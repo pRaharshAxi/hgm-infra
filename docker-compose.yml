@@ -1,0 +1,149 @@
+    # full local dev stack (all 9 services)
+version: '3.8'
+
+services:
+  # ============ DATABASES ============
+  postgres:
+    image: postgres:16
+    container_name: hgm-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: homegarden
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mongodb:
+    image: mongo:7
+    container_name: hgm-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+
+  # ============ MESSAGE BROKER ============
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: hgm-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+
+  # ============ CACHE ============
+  redis:
+    image: redis:7
+    container_name: hgm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # ============ SEARCH ENGINE ============
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: hgm-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+
+  # ============ FILE STORAGE ============
+  minio:
+    image: minio/minio:latest
+    container_name: hgm-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+
+  # ============ SYSTEM A ============
+  system-a:
+    build:
+      context: ../hgm-system-a
+      dockerfile: Dockerfile
+    container_name: hgm-system-a
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=postgres
+      - DB_DATABASE=homegarden
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=your-super-secret-jwt-key
+      - REFRESH_SECRET=your-super-secret-refresh-key
+      - PORT=3001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+
+  # ============ SYSTEM B ============
+  system-b:
+    build:
+      context: ../hgm-system-b
+      dockerfile: Dockerfile
+    container_name: hgm-system-b
+    ports:
+      - "3002:3002"
+    environment:
+      - NODE_ENV=development
+      - MONGODB_URI=mongodb://mongodb:27017/homegarden
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - PORT=3002
+    depends_on:
+      - mongodb
+      - elasticsearch
+      - rabbitmq
+      - redis
+
+  # ============ FRONTEND ============
+  frontend:
+    build:
+      context: ../hgm-frontend
+      dockerfile: Dockerfile
+    container_name: hgm-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - system-a
+      - system-b
+
+volumes:
+  postgres_data:
+  mongodb_data:
+  rabbitmq_data:
+  redis_data:
+  elasticsearch_data:
+  minio_data:
