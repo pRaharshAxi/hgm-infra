@@ -1,149 +1,197 @@
-    # full local dev stack (all 9 services)
 version: '3.8'
 
 services:
-  # ============ DATABASES ============
+
+  # ─── DATABASES & INFRASTRUCTURE ───────────────────────
   postgres:
-    image: postgres:16
-    container_name: hgm-postgres
+    image: postgres:16.2-alpine
+    container_name: hgm_postgres
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: homegarden
+      POSTGRES_USER: hgm_user
+      POSTGRES_PASSWORD: hgm_password
+      POSTGRES_DB: hgm_system_a
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U hgm_user -d hgm_system_a"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - hgm_network
 
   mongodb:
-    image: mongo:7
-    container_name: hgm-mongodb
+    image: mongo:7.0
+    container_name: hgm_mongodb
     ports:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hgm_network
 
-  # ============ MESSAGE BROKER ============
+  elasticsearch:
+    image: elasticsearch:8.12.2
+    container_name: hgm_elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=hgm_elastic_password
+      - xpack.security.enabled=true
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:hgm_elastic_password http://localhost:9200/_cluster/health | grep -q status"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+    networks:
+      - hgm_network
+
   rabbitmq:
-    image: rabbitmq:3-management
-    container_name: hgm-rabbitmq
+    image: rabbitmq:3.13-management-alpine
+    container_name: hgm_rabbitmq
     ports:
       - "5672:5672"
-      - "15672:15672"  # Management UI
+      - "15672:15672"
     environment:
       RABBITMQ_DEFAULT_USER: guest
       RABBITMQ_DEFAULT_PASS: guest
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hgm_network
 
-  # ============ CACHE ============
   redis:
-    image: redis:7
-    container_name: hgm-redis
+    image: redis:7.2.4-alpine
+    container_name: hgm_redis
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    networks:
+      - hgm_network
 
-  # ============ SEARCH ENGINE ============
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: hgm-elasticsearch
-    environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-    ports:
-      - "9200:9200"
-    volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
-
-  # ============ FILE STORAGE ============
   minio:
-    image: minio/minio:latest
-    container_name: hgm-minio
+    image: minio/minio:RELEASE.2024-02-26T09-14-28Z
+    container_name: hgm_minio
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
-    command: server /data --console-address ":9001"
+    networks:
+      - hgm_network
 
-  # ============ SYSTEM A ============
+  # ─── SYSTEM A — Core Transaction Service ──────────────
   system-a:
     build:
       context: ../hgm-system-a
       dockerfile: Dockerfile
-    container_name: hgm-system-a
+    container_name: hgm_system_a
     ports:
       - "3001:3001"
+    env_file:
+      - .env.integration
     environment:
-      - NODE_ENV=development
-      - DB_HOST=postgres
-      - DB_PORT=5432
-      - DB_USERNAME=postgres
-      - DB_PASSWORD=postgres
-      - DB_DATABASE=homegarden
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - JWT_SECRET=your-super-secret-jwt-key
-      - REFRESH_SECRET=your-super-secret-refresh-key
-      - PORT=3001
+      DB_HOST: postgres
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDIS_HOST: redis
+      MINIO_ENDPOINT: minio
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
         condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3001/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - hgm_network
+    restart: on-failure
 
-  # ============ SYSTEM B ============
+  # ─── SYSTEM B — Discovery & Engagement Service ────────
   system-b:
     build:
       context: ../hgm-system-b
       dockerfile: Dockerfile
-    container_name: hgm-system-b
+    container_name: hgm_system_b
     ports:
       - "3002:3002"
+    env_file:
+      - .env.integration
     environment:
-      - NODE_ENV=development
-      - MONGODB_URI=mongodb://mongodb:27017/homegarden
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - PORT=3002
+      MONGODB_URI: mongodb://mongodb:27017/hgm_system_b
+      ELASTICSEARCH_NODE: http://elasticsearch:9200
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      REDIS_HOST: redis
     depends_on:
-      - mongodb
-      - elasticsearch
-      - rabbitmq
-      - redis
+      mongodb:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3002/health || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - hgm_network
+    restart: on-failure
 
-  # ============ FRONTEND ============
+  # ─── FRONTEND ──────────────────────────────────────────
   frontend:
     build:
       context: ../hgm-frontend
       dockerfile: Dockerfile
-    container_name: hgm-frontend
+    container_name: hgm_frontend
     ports:
       - "80:80"
     depends_on:
-      - system-a
-      - system-b
+      system-a:
+        condition: service_healthy
+      system-b:
+        condition: service_healthy
+    networks:
+      - hgm_network
+    restart: on-failure
 
 volumes:
   postgres_data:
   mongodb_data:
+  elasticsearch_data:
   rabbitmq_data:
   redis_data:
-  elasticsearch_data:
   minio_data:
+
+networks:
+  hgm_network:
+    driver: bridge
