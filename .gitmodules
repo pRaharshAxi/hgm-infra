@@ -1,0 +1,9 @@
+[submodule "system-a"]
+	path = system-a
+	url = https://github.com/pRaharshAxi/hgm-system-a.git
+[submodule "system-b"]
+	path = system-b
+	url = https://github.com/pRaharshAxi/hgm-system-b.git
+[submodule "frontend"]
+	path = frontend
+	url = https://github.com/pRaharshAxi/hgm-frontend.git
