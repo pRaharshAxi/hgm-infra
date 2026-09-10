@@ -19,13 +19,14 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
     networks:
       - hgm_network
 
   mongodb:
     image: mongo:7.0
     container_name: hgm_mongodb
+    init: true
     ports:
       - "27017:27017"
     volumes:
@@ -42,11 +43,13 @@ services:
   elasticsearch:
     image: elasticsearch:8.12.2
     container_name: hgm_elasticsearch
+    init: true
     environment:
       - discovery.type=single-node
       - ELASTIC_PASSWORD=hgm_elastic_password
       - xpack.security.enabled=true
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.ml.enabled=false # Disables heavy Machine Learning plugins to speed up boot time
     ports:
       - "9200:9200"
     volumes:
@@ -55,8 +58,8 @@ services:
       test: ["CMD-SHELL", "curl -s -u elastic:hgm_elastic_password http://localhost:9200/_cluster/health | grep -q status"]
       interval: 20s
       timeout: 10s
-      retries: 10
-      start_period: 60s
+      retries: 20
+      start_period: 180s
     networks:
       - hgm_network
 
