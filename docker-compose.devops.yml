@@ -1,0 +1,58 @@
+# DevOps services: Jenkins + SonarQube
+# Usage: docker compose -f docker-compose.yml -f docker-compose.devops.yml up -d
+#
+# This file ADDS to your existing docker-compose.yml — it does not replace it.
+# Run both files together so Jenkins/SonarQube join the same network as
+# system-a, system-b, postgres, etc.
+
+services:
+  # ---------------------------------------------------------------
+  # SonarQube — code quality / static analysis
+  # ---------------------------------------------------------------
+  sonarqube-db:
+    image: postgres:16.2
+    container_name: hgm_sonar_db
+    environment:
+      POSTGRES_USER: sonar
+      POSTGRES_PASSWORD: sonar_password
+      POSTGRES_DB: sonarqube
+    volumes:
+      - sonar_db_data:/var/lib/postgresql/data
+    networks:
+      - hgm_network
+    restart: unless-stopped
+
+  sonarqube:
+    image: sonarqube:10.4-community
+    container_name: hgm_sonarqube
+    depends_on:
+      - sonarqube-db
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonarqube-db:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonar
+      SONAR_JDBC_PASSWORD: sonar_password
+    ports:
+      - "9090:9000"
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+      - sonar_extensions:/opt/sonarqube/extensions
+      - sonar_logs:/opt/sonarqube/logs
+    networks:
+      - hgm_network
+    restart: unless-stopped
+    # SonarQube needs these on Linux hosts; harmless on Windows/WSL2 Docker Desktop
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+networks:
+  hgm_network:
+    external: true
+    name: hgm-infra_hgm_network
+
+volumes:
+  sonar_db_data:
+  sonar_data:
+  sonar_extensions:
+  sonar_logs:
