@@ -94,7 +94,7 @@ services:
       - hgm_network
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     container_name: hgm_minio
     ports:
       - "9000:9000"
