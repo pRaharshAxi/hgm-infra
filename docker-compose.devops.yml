@@ -46,6 +46,20 @@ services:
         soft: 65536
         hard: 65536
 
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: hgm_jenkins
+    user: root
+    ports:
+      - "8081:8080"
+      - "50000:50000"
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - hgm_network
+    restart: unless-stopped       
+
 networks:
   hgm_network:
     external: true
@@ -56,3 +70,4 @@ volumes:
   sonar_data:
   sonar_extensions:
   sonar_logs:
+  jenkins_home:

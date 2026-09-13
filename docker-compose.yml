@@ -34,9 +34,9 @@ services:
     healthcheck:
       test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
       interval: 10s
-      timeout: 5s
+      timeout: 15s
       retries: 5
-      start_period: 40s
+      start_period: 60s
     networks:
       - hgm_network
 
@@ -108,10 +108,32 @@ services:
     networks:
       - hgm_network
 
+  # ─── CAMUNDA — Workflow Orchestration ─────────────────
+  camunda:
+    image: camunda/zeebe:8.5.8
+    container_name: hgm_camunda
+    ports:
+      - "26500:26500"
+      - "9600:9600"
+    environment:
+      - ZEEBE_BROKER_GATEWAY_ENABLE=true
+      - ZEEBE_BROKER_NETWORK_HOST=0.0.0.0
+      - ZEEBE_BROKER_GATEWAY_NETWORK_HOST=0.0.0.0
+      - ZEEBE_BROKER_GATEWAY_NETWORK_PORT=26500
+      - ZEEBE_BROKER_CLUSTER_PARTITIONSCOUNT=1
+      - ZEEBE_BROKER_CLUSTER_REPLICATIONFACTOR=1
+      - ZEEBE_BROKER_CLUSTER_CLUSTERSIZE=1
+      - JAVA_TOOL_OPTIONS=-Xms256m -Xmx512m
+    volumes:
+      - camunda_data:/usr/local/zeebe/data
+    networks:
+      - hgm_network
+    restart: unless-stopped      
+
   # ─── SYSTEM A — Core Transaction Service ──────────────
   system-a:
     build:
-      context: ../hgm-system-a
+      context: ./system-a
       dockerfile: Dockerfile
     container_name: hgm_system_a
     ports:
@@ -123,6 +145,9 @@ services:
       RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
       REDIS_HOST: redis
       MINIO_ENDPOINT: minio
+      ZEEBE_ADDRESS: camunda:26500
+      CAMUNDA_SECURE_CONNECTION: "false"
+      CAMUNDA_AUTH_STRATEGY: NONE
     depends_on:
       postgres:
         condition: service_healthy
@@ -130,6 +155,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+      camunda:
+        condition: service_started   
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1"]
       interval: 15s
@@ -143,7 +170,7 @@ services:
   # ─── SYSTEM B — Discovery & Engagement Service ────────
   system-b:
     build:
-      context: ../hgm-system-b
+      context: ./system-b
       dockerfile: Dockerfile
     container_name: hgm_system_b
     ports:
@@ -177,7 +204,7 @@ services:
   # ─── FRONTEND ──────────────────────────────────────────
   frontend:
     build:
-      context: ../hgm-frontend
+      context: ./frontend
       dockerfile: Dockerfile
     container_name: hgm_frontend
     ports:
@@ -198,6 +225,7 @@ volumes:
   rabbitmq_data:
   redis_data:
   minio_data:
+  camunda_data:
 
 networks:
   hgm_network:
